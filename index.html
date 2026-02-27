@@ -223,7 +223,7 @@
   <img id="capturedImage" style="display:none" />
   <div class="modal-actions">
     <button class="btn btn-primary" id="snapBtn" onclick="snapPhoto()">⚡ SCAN</button>
-    <button class="btn btn-success hidden" id="submitBtn" onclick="submitPhoto()">✅ SUBMIT</button>
+    <button class="btn btn-success hidden" id="submitBtn" onclick="submitPhoto()" disabled>✅ SUBMIT</button>
     <button class="btn btn-ghost hidden" id="retakeBtn" onclick="retakePhoto()">↩ RETAKE</button>
     <button class="btn btn-danger" onclick="closeCamera()">✕ CANCEL</button>
   </div>
@@ -544,13 +544,22 @@ function snapPhoto() {
     capturedBlob = blob;
     const url = URL.createObjectURL(blob);
     const img = document.getElementById('capturedImage');
+    const submitBtn = document.getElementById('submitBtn');
+    // Keep submit disabled until image is fully loaded
+    submitBtn.disabled = true;
     img.onload = () => {
       video.style.display = 'none';
       img.style.display = 'block';
       document.getElementById('snapBtn').classList.add('hidden');
       document.getElementById('snapBtn').disabled = false;
-      document.getElementById('submitBtn').classList.remove('hidden');
+      submitBtn.classList.remove('hidden');
+      submitBtn.disabled = false; // Only enable AFTER image confirmed loaded
       document.getElementById('retakeBtn').classList.remove('hidden');
+    };
+    img.onerror = () => {
+      capturedBlob = null;
+      alert('Failed to load photo preview. Please try again.');
+      document.getElementById('snapBtn').disabled = false;
     };
     img.src = url;
     if (cameraStream) cameraStream.getTracks().forEach(t => t.stop());
@@ -558,11 +567,17 @@ function snapPhoto() {
 }
 
 function retakePhoto() {
-  capturedBlob=null;
-  const video=document.getElementById('cameraView'), img=document.getElementById('capturedImage');
-  video.style.display='block'; img.style.display='none';
+  capturedBlob = null;
+  const video = document.getElementById('cameraView');
+  const img = document.getElementById('capturedImage');
+  const submitBtn = document.getElementById('submitBtn');
+  video.style.display = 'block';
+  img.style.display = 'none';
+  img.src = '';
   document.getElementById('snapBtn').classList.remove('hidden');
-  document.getElementById('submitBtn').classList.add('hidden');
+  document.getElementById('snapBtn').disabled = false;
+  submitBtn.classList.add('hidden');
+  submitBtn.disabled = true;
   document.getElementById('retakeBtn').classList.add('hidden');
   navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}}).then(s=>{cameraStream=s;video.srcObject=s;});
 }
