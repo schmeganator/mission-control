@@ -523,19 +523,38 @@ async function openCamera(choreId) {
 
 function snapPhoto() {
   const video = document.getElementById('cameraView');
+  if (!video.videoWidth || !video.videoHeight) {
+    alert('Camera not ready yet, try again in a moment.');
+    return;
+  }
   const canvas = document.createElement('canvas');
-  canvas.width=video.videoWidth; canvas.height=video.videoHeight;
-  canvas.getContext('2d').drawImage(video,0,0);
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext('2d').drawImage(video, 0, 0);
+
+  // Disable snap button immediately to prevent double-tap
+  document.getElementById('snapBtn').disabled = true;
+
   canvas.toBlob(blob => {
-    capturedBlob=blob;
-    const img=document.getElementById('capturedImage');
-    img.src=URL.createObjectURL(blob); img.style.display='block';
-    video.style.display='none';
-    document.getElementById('snapBtn').classList.add('hidden');
-    document.getElementById('submitBtn').classList.remove('hidden');
-    document.getElementById('retakeBtn').classList.remove('hidden');
-    if (cameraStream) cameraStream.getTracks().forEach(t=>t.stop());
-  },'image/jpeg',0.85);
+    if (!blob) {
+      alert('Failed to capture photo. Please try again.');
+      document.getElementById('snapBtn').disabled = false;
+      return;
+    }
+    capturedBlob = blob;
+    const url = URL.createObjectURL(blob);
+    const img = document.getElementById('capturedImage');
+    img.onload = () => {
+      video.style.display = 'none';
+      img.style.display = 'block';
+      document.getElementById('snapBtn').classList.add('hidden');
+      document.getElementById('snapBtn').disabled = false;
+      document.getElementById('submitBtn').classList.remove('hidden');
+      document.getElementById('retakeBtn').classList.remove('hidden');
+    };
+    img.src = url;
+    if (cameraStream) cameraStream.getTracks().forEach(t => t.stop());
+  }, 'image/jpeg', 0.85);
 }
 
 function retakePhoto() {
@@ -555,35 +574,57 @@ function closeCamera() {
 }
 
 async function submitPhoto() {
-  if (!capturedBlob) return;
+  if (!capturedBlob || !(capturedBlob instanceof Blob)) {
+    alert('No photo captured. Please snap a photo first.');
+    return;
+  }
   if (!state.apiKey) { alert('No API key set! Go to ⚙ COMMAND settings.'); return; }
   closeCamera();
   document.getElementById('analyzingOverlay').classList.remove('hidden');
-  const ch = state.chores.find(c=>c.id===currentChoreId);
+  const ch = state.chores.find(c => c.id === currentChoreId);
   const reader = new FileReader();
   reader.onloadend = async () => {
+    if (!reader.result || !reader.result.includes(',')) {
+      document.getElementById('analyzingOverlay').classList.add('hidden');
+      alert('Failed to read photo data. Please try again.');
+      return;
+    }
     const b64 = reader.result.split(',')[1];
     try {
       const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method:'POST',
-        headers:{'Content-Type':'application/json','x-api-key':state.apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
-        body:JSON.stringify({
-          model:'claude-opus-4-6', max_tokens:300,
-          messages:[{role:'user',content:[
-            {type:'image',source:{type:'base64',media_type:'image/jpeg',data:b64}},
-            {type:'text',text:`You are a friendly chore inspector for a 7-year-old. The chore is: "${ch.name}" - ${ch.desc}.\nScore 0-100. Pass threshold: ${state.threshold}%.\nRespond ONLY in JSON: {"score":<0-100>,"pass":<true/false>,"feedback":"<one short encouraging space-explorer sentence under 20 words>"}`}
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': state.apiKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true'
+        },
+        body: JSON.stringify({
+          model: 'claude-opus-4-6', max_tokens: 300,
+          messages: [{role: 'user', content: [
+            {type: 'image', source: {type: 'base64', media_type: 'image/jpeg', data: b64}},
+            {type: 'text', text: `You are a friendly chore inspector for a 7-year-old. The chore is: "${ch.name}" - ${ch.desc}.\nScore 0-100. Pass threshold: ${state.threshold}%.\nRespond ONLY in JSON: {"score":<0-100>,"pass":<true/false>,"feedback":"<one short encouraging space-explorer sentence under 20 words>"}`}
           ]}]
         })
       });
       const data = await res.json();
       document.getElementById('analyzingOverlay').classList.add('hidden');
-      if (!res.ok) throw new Error(data.error?.message||'API error');
-      const result = JSON.parse(data.content[0].text.trim());
+      if (!res.ok) throw new Error(data.error?.message || `API error ${res.status}`);
+      let result;
+      try {
+        result = JSON.parse(data.content[0].text.trim());
+      } catch(e) {
+        throw new Error('Could not parse AI response. Try again.');
+      }
       showResult(result);
     } catch(e) {
       document.getElementById('analyzingOverlay').classList.add('hidden');
       alert('Error: ' + e.message);
     }
+  };
+  reader.onerror = () => {
+    document.getElementById('analyzingOverlay').classList.add('hidden');
+    alert('Failed to read photo. Please try again.');
   };
   reader.readAsDataURL(capturedBlob);
 }
